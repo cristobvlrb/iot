@@ -1,0 +1,43 @@
+rules_version = '2';
+
+// Reglas de seguridad de Firestore (control de acceso, ISO/IEC 27400).
+// Se copian en: Consola de Firebase > Firestore Database > Reglas > Publicar.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function logueado() {
+      return request.auth != null;
+    }
+
+    function esAdmin() {
+      return logueado() &&
+        get(/databases/$(database)/documents/roles/$(request.auth.token.email)).data.rol == 'admin';
+    }
+
+    // Roles: cada usuario solo puede leer SU propio rol. Nadie puede cambiarlos desde la app.
+    match /roles/{correo} {
+      allow read: if logueado() && request.auth.token.email == correo;
+      allow write: if false;
+    }
+
+    // Nodo IoT simulado.
+    // - Cualquier usuario logueado lo puede leer.
+    // - El Admin puede crearlo y cambiar todo (comandos).
+    // - El Guardia solo puede cambiar lo que harían los sensores (aforo y alerta), no los comandos.
+    match /nodo/{sala} {
+      allow read: if logueado();
+      allow create: if esAdmin();
+      allow update: if esAdmin() ||
+        (logueado() && request.resource.data.diff(resource.data).affectedKeys()
+                         .hasOnly(['aforo', 'alertaVibracion', 'actualizado']));
+      allow delete: if false;
+    }
+
+    // Historial: se puede leer y agregar (firmado con el propio correo), pero nunca editar ni borrar.
+    match /eventos/{id} {
+      allow read: if logueado();
+      allow create: if logueado() && request.resource.data.usuario == request.auth.token.email;
+      allow update, delete: if false;
+    }
+  }
+}
